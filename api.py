@@ -37,6 +37,8 @@ GENDERS = {
     FEMALE: "female",
 }
 
+###--------------------------------------------- Create Descriptors ------------------------------------------
+
 
 class Fields:
     __metaclass__ = abc.ABCMeta
@@ -67,7 +69,6 @@ class CharField(Fields):
     def validate(self, value):
         if not isinstance(value, str) and value is not None:
             raise TypeError('{} must be a string'.format(self.public_name))
-
 
 
 class ArgumentsField(Fields):
@@ -140,6 +141,8 @@ class ClientIDsField(Fields):
             raise ValueError('{} must be a list of numbers'.format(self.public_name))
 
 
+###------------------------------------------ Create API -------------------------------------------------
+
 class ClientsInterestsRequest(object):
     client_ids = ClientIDsField(required=True)
     date = DateField(required=False, nullable=True)
@@ -201,6 +204,8 @@ class MethodRequest(object):
         return self.login == ADMIN_LOGIN
 
 
+###--------------------------------------------------- Methcds ---------------------------------------------------
+
 def check_auth(request):
     if request.is_admin:
         digest = hashlib.sha512((datetime.datetime.now().strftime("%Y%m%d%H") + ADMIN_SALT).encode('utf-8')).hexdigest()
@@ -211,61 +216,65 @@ def check_auth(request):
     return False
 
 
+def get_score_response(request, request_local):
+    if request.is_admin:
+        response = {'score': 42}
+        context = {}
+    else:
+        scoring_request_dict = {k[1:]: v for k, v in request_local.__dict__.items()}
+        response = {'score': get_score(**scoring_request_dict)}
+        context = {'has': [k for k, v in scoring_request_dict.items() if v is not None]}
+    return response, context
+
+
+def get_interest_response(request, request_local):
+    response = {str(i): get_interests(str(i)) for i in request_local.client_ids}
+    context = {'nclients': len(request_local.client_ids)}
+    return response, context
+
+
 def method_apply(request):
     method, arguments = request.method, request.arguments
     context = {}
-    if method == 'online_score':
-        try:
-            scoring_request = OnlineScoreRequest(**arguments)
-            print(scoring_request.__dict__)
-            notnullable = [k for k, v in scoring_request.__dict__.items() if v is not None]
-            print(notnullable)
-            if (('_phone' in notnullable and '_email' in notnullable) or
-                ('_first_name' in notnullable and '_last_name' in notnullable) or
-                ('_gender' in notnullable and '_birthday' in notnullable)):
-                pass
-            else:
-                raise ValueError('Arguments dictionary does not have required keys')
-        except (TypeError, ValueError) as e:
-            logging.exception("Validation error: %s" % e)
-            code = INVALID_REQUEST
-            response = getattr(e, 'message', str(e))
+    available_methods = {
+        "online_score": (OnlineScoreRequest, get_score_response),
+        "clients_interests": (ClientsInterestsRequest, get_interest_response)
+    }
+    try:
+        local_request = available_methods[method][0](**arguments)
+        notnullable = [k for k, v in local_request.__dict__.items() if v is not None]
+        if (('_client_ids' in notnullable) or
+            ('_phone' in notnullable and '_email' in notnullable) or
+            ('_first_name' in notnullable and '_last_name' in notnullable) or
+            ('_gender' in notnullable and '_birthday' in notnullable)):
+            pass
         else:
-            code = OK
-            if request.is_admin:
-                response = {'score': 42}
-            else:
-                scoring_request_dict = {k[1:]: v for k, v in scoring_request.__dict__.items()}
-                response = {'score': get_score(**scoring_request_dict)}
-                context = {'has': [k for k, v in scoring_request_dict.items() if v is not None]}
-    elif method == 'clients_interests':
-        try:
-            interests_request = ClientsInterestsRequest(**arguments)
-        except (TypeError, ValueError) as e:
-            logging.exception("Validation error: %s" % e)
-            code = INVALID_REQUEST
-            response = getattr(e, 'message', str(e))
-        else:
-            code = OK
-            response = {str(i): get_interests(str(i)) for i in interests_request.client_ids}
-            context = {'nclients': len(interests_request.client_ids)}
-    else:
+            raise ValueError('Arguments dictionary does not have required keys')
+    except (TypeError, ValueError) as e:
+        logging.info("Validation error: %s" % e)
+        code = INVALID_REQUEST
+        response = getattr(e, 'message', str(e))
+    except KeyError as e:
+        logging.info("Atribute method is not valid: %s" % e)
         code, response = INVALID_REQUEST, ERRORS[INVALID_REQUEST]
+    else:
+        code = OK
+        response, context = available_methods[method][1](request, local_request)
+    logging.info(response)
     return code, response, context
 
 
 def method_handler(request, ctx):
     request_body, request_header = request['body'], request['headers']
-    response = None
-    context = {}
     try:
         request_obj = MethodRequest(**request_body)
     except (TypeError, ValueError) as e:
-        logging.exception("Validation had not passed: %s" % e)
+        logging.info("Validation had not passed: %s" % getattr(e, 'message', str(e)))
         code, response = INVALID_REQUEST, ERRORS[INVALID_REQUEST]
     else:
         if not check_auth(request_obj):
             code, response = FORBIDDEN, 'Authorization is failed'
+            logging.info("Authorization is failed")
         else:
             code, response, context = method_apply(request_obj)
             ctx.update(context)
@@ -297,7 +306,7 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
             logging.info("%s: %s %s" % (self.path, data_string, context["request_id"]))
             if path in self.router:
                 try:
-                    response, codex = self.router[path]({"body": request, "headers": self.headers}, context)
+                    response, code = self.router[path]({"body": request, "headers": self.headers}, context)
                 except Exception as e:
                     logging.exception("Unexpected error: %s" % e)
                     code = INTERNAL_ERROR
