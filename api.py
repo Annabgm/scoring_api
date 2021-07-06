@@ -97,7 +97,7 @@ class PhoneField(Fields):
                 raise TypeError('{} must be a string or an integer'.format(self.public_name))
             elif ((isinstance(value, str) and not phone_templ.fullmatch(value)) or
                   (isinstance(value, int) and value//7e+10 < 1.)):
-                raise ValueError('{} is not a phone number'.format(self.public_name))
+                raise ValueError('{} is not a phone number, should start with 7'.format(self.public_name))
 
 
 class DateField(Fields):
@@ -207,6 +207,11 @@ class MethodRequest(object):
 ###--------------------------------------------------- Methcds ---------------------------------------------------
 
 def check_auth(request):
+    """
+    function check the authority and than check that the hashed login corresponds to the token that has been sent
+    Takes request event
+    :return bool
+    """
     if request.is_admin:
         digest = hashlib.sha512((datetime.datetime.now().strftime("%Y%m%d%H") + ADMIN_SALT).encode('utf-8')).hexdigest()
     else:
@@ -217,6 +222,10 @@ def check_auth(request):
 
 
 def get_score_response(request, request_local):
+    """
+    function calculate scoring value depends on the user's authority, return score and logging context
+    :return dict[str, int], dict[str, List[str]]
+    """
     if request.is_admin:
         response = {'score': 42}
         context = {}
@@ -228,12 +237,20 @@ def get_score_response(request, request_local):
 
 
 def get_interest_response(request, request_local):
+    """
+    function calculate interest, return interest and logging context
+    :return dict[str, List[str]], dict[str, List[int]]
+    """
     response = {str(i): get_interests(str(i)) for i in request_local.client_ids}
     context = {'nclients': len(request_local.client_ids)}
     return response, context
 
 
 def method_apply(request):
+    """
+    function tries to evaluate scoring or interest with check of variables validity first
+    :return code, result from get_interest_response or get_score_response functions or default response
+    """
     method, arguments = request.method, request.arguments
     context = {}
     available_methods = {
@@ -255,7 +272,7 @@ def method_apply(request):
         code = INVALID_REQUEST
         response = getattr(e, 'message', str(e))
     except KeyError as e:
-        logging.info("Atribute method is not valid: %s" % e)
+        logging.info("Attribute method is not valid: %s" % e)
         code, response = INVALID_REQUEST, ERRORS[INVALID_REQUEST]
     else:
         code = OK
@@ -265,6 +282,12 @@ def method_apply(request):
 
 
 def method_handler(request, ctx):
+    """
+    function check the validity of request's attributes, if correct return result from function method_apply
+    :param request: POST request
+    :param ctx: logging dictionary
+    :return: response and code, is the request successful or not
+    """
     request_body, request_header = request['body'], request['headers']
     try:
         request_obj = MethodRequest(**request_body)
