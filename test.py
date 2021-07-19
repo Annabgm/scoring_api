@@ -4,6 +4,7 @@ import functools
 import unittest
 
 import api
+# import main as api
 
 
 def cases(case):
@@ -12,7 +13,12 @@ def cases(case):
         def wrapper(*args):
             for c in case:
                 new_args = args + (c if isinstance(c, tuple) else (c,))
-                f(*new_args)
+                try:
+                    f(*new_args)
+                except Exception as e:
+                    msg = 'Case has failed with attributes:: ' + ', '.join('{}: {}'.format(k, v) for k, v in c.items())
+                    print(msg)
+                    raise e
         return wrapper
     return decorator
 
@@ -82,7 +88,7 @@ class TestSuite(unittest.TestCase):
 
     @cases([
         {"phone": "79175002040", "email": "stupnikov@otus.ru"},
-        {"phone": 79175002040, "email": "stupnikov@otus.ru"},
+        {"phone": 79175002090, "email": "stupnikov@otus.ru"},
         {"gender": 1, "birthday": "01.01.2000", "first_name": "a", "last_name": "b"},
         {"gender": 0, "birthday": "01.01.2000"},
         {"gender": 2, "birthday": "01.01.2000"},
