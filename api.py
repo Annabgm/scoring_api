@@ -157,7 +157,6 @@ class Request(metaclass=MetaRequest):
         all_arg = {k: None for k in cls.__sign__}
         all_arg.update(kwards)
         for k, v in all_arg.items():
-            print(k, v)
             setattr(cls, k, v)
 
 
